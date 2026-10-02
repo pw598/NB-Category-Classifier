@@ -14,6 +14,9 @@ then chosen from all of them.
     out_of_fold_predictions()   the expensive part: k model refits
     crossfit_accuracy()         Option A thresholds, honestly priced
     crossfit_cost()             Option B thresholds, honestly priced
+    id_hash_folds()             folds a second model can reproduce exactly
+    oof_table()                 the out-of-fold predictions, one row per
+                                product, for stacking with another model
 
 Cost: k full training runs. At n_levels=4 that is k times the memory
 pressure of one run, so start with n_folds=2 while experimenting and move
@@ -91,6 +94,57 @@ def make_folds(
     return folds
 
 
+def id_hash_folds(ids, n_folds: int = 5, seed: int = 0) -> np.ndarray:
+    """Fold id per row, decided by the row's identifier and nothing else.
+
+    make_folds() depends on which rows are present and what order they
+    are in, so two projects that filter the catalogue differently cannot
+    reproduce each other's folds. This one can be recomputed anywhere:
+    the fold is a hash of the identifier, so a product lands in the same
+    fold in every project that uses the same n_folds and seed, whatever
+    else is in the file and however the file is sorted. It also survives
+    a restart, which matters to a model too slow to cross-validate in
+    one sitting.
+
+    That is what stacking two models needs. Each model's prediction for
+    a product must come from a fit that never saw it, and sharing the
+    folds means "never saw it" refers to the same set of products for
+    both.
+
+    The neural-network repo carries an identical copy of this function.
+    The two must stay identical: change the hash here and the folds stop
+    matching, silently.
+
+    Not stratified -- it cannot be without looking at the other rows.
+    With a few rows per category a held-out row can occasionally find
+    its category absent from training. That is rare (a category needs
+    all its other rows in the same fold) and it is honest: such a row is
+    scored wrong, as a new product in a category the model had never
+    seen would be.
+
+    sha1 rather than hash(): Python salts hash() per process, so it
+    would give different folds on every run.
+    """
+    import hashlib
+
+    if n_folds < 2:
+        raise ValueError("n_folds must be at least 2.")
+    keys = pd.Series(np.asarray(ids, dtype=object)).astype(str).str.strip()
+    blank = keys.isin(("", "nan", "None", "<NA>"))
+    if blank.any():
+        raise ValueError(
+            f"{int(blank.sum()):,} row(s) have a blank identifier, so they "
+            "cannot be given a reproducible fold. Fill or drop them first."
+        )
+
+    def _fold(key: str) -> int:
+        digest = hashlib.sha1(f"{seed}|{key}".encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], "big") % n_folds
+
+    mapping = {key: _fold(key) for key in keys.unique()}
+    return keys.map(mapping).to_numpy(dtype=int)
+
+
 # ---------------------------------------------------------------------------
 # The expensive part
 # ---------------------------------------------------------------------------
@@ -103,12 +157,29 @@ def out_of_fold_predictions(
     random_state: int = 42,
     spark=None,
     verbose: bool = True,
+    fold_method: str = "stratified",
+    fold_key_col: Optional[str] = None,
+    with_quality: bool = False,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, np.ndarray, pd.DataFrame]:
     """Prefix probabilities for every usable row, from a model that never
     saw it.
 
     Applies the same cleaning and filtering as run(), then folds. Only one
     model is held in memory at a time.
+
+    fold_method chooses how rows are assigned to folds:
+
+        "stratified"  make_folds(): balanced on the deepest level. The
+                      default, and what the threshold work in notebook 3
+                      has always used.
+        "id_hash"     id_hash_folds() on fold_key_col (cfg.data.id_col
+                      when not given), seeded by random_state. Use this
+                      when the predictions will be stacked with another
+                      model's, so both can be folded identically.
+
+    with_quality=True adds n_tokens, n_known, oov_rate and usable to the
+    returned frame, measured against each fold's own vocabulary -- what
+    the model scoring a row could actually read of it.
 
     Returns (prefix, actual, folds, frame):
         prefix  per-depth prefix probabilities and labels, all rows
@@ -130,12 +201,31 @@ def out_of_fold_predictions(
     df = data_mod.drop_rare_paths(df, levels, cfg.split.min_path_count)
     df = df.reset_index(drop=True)
 
-    folds = make_folds(df[levels[-1]], n_folds, random_state, cfg.split.stratify)
+    if fold_method == "stratified":
+        folds = make_folds(df[levels[-1]], n_folds, random_state, cfg.split.stratify)
+    elif fold_method == "id_hash":
+        key_col = fold_key_col or cfg.data.id_col
+        if not key_col or key_col not in df.columns:
+            raise KeyError(
+                f"fold_method='id_hash' needs an identifier column, and "
+                f"{key_col!r} is not in the data. Columns: {list(df.columns)}"
+            )
+        folds = id_hash_folds(df[key_col], n_folds, seed=random_state)
+        if verbose:
+            n_dupes = int(df[key_col].astype(str).str.strip().duplicated().sum())
+            print(f"[cv] folds from a hash of {key_col!r} (seed {random_state})"
+                  + (f"; {n_dupes:,} repeated identifiers share a fold with "
+                     "their first occurrence" if n_dupes else ""))
+    else:
+        raise ValueError(
+            f"fold_method={fold_method!r}; expected 'stratified' or 'id_hash'."
+        )
     if verbose:
         print(f"[cv] {len(df):,} usable rows, {n_folds} folds "
               f"({np.bincount(folds).min():,}-{np.bincount(folds).max():,} rows each)")
 
     pieces = []
+    quality_pieces = []
     for k in range(n_folds):
         train_mask, score_mask = folds != k, folds == k
         if verbose:
@@ -148,12 +238,100 @@ def out_of_fold_predictions(
         part.index = np.flatnonzero(score_mask)
         pieces.append(part)
 
+        if with_quality:
+            from .quality import describe_inputs
+
+            q = describe_inputs(clf, df.loc[score_mask, cfg.data.text_col])
+            q.index = np.flatnonzero(score_mask)
+            quality_pieces.append(q)
+
         del clf, part
         gc.collect()
 
     prefix = pd.concat(pieces).sort_index().reset_index(drop=True)
     actual = df[levels].astype(str).reset_index(drop=True)
+    if quality_pieces:
+        quality = pd.concat(quality_pieces).sort_index().reset_index(drop=True)
+        df = pd.concat([df, quality[["n_tokens", "n_known", "oov_rate", "usable"]]],
+                       axis=1)
     return prefix, actual, folds, df
+
+
+def oof_table(
+    prefix: pd.DataFrame,
+    actual: pd.DataFrame,
+    folds: np.ndarray,
+    frame: pd.DataFrame,
+    level_columns: List[str],
+    id_cols: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """The out-of-fold predictions as one tidy row per product.
+
+    Shaped like the deployed model's output, so the two can be used
+    interchangeably downstream -- a model stacked on these columns is then
+    being fitted on what it will be fed in production:
+
+        Predicted <level>    the best full-depth path, one column per level
+        L<d> Confidence      the score of the best prefix at depth d
+
+    with, alongside:
+
+        fold                 the fold that held the row out
+        Actual <level>       the true label, to judge the prediction by
+        L<d> Margin          best prefix minus the runner-up
+        L<d> Prefix Agrees   whether the best depth-d prefix is the first d
+                             levels of the predicted path
+
+    That last column exists because the two can part company. Confidence
+    at depth d belongs to that depth's best prefix, found by summing over
+    its children, and the sum can favour a different prefix from the one
+    the best full path sits under. They always agree at full depth. Where
+    they disagree at a shallower depth, the confidence is describing a
+    different category from the one in the Predicted column -- worth
+    knowing before treating the pair as one prediction.
+
+    id_cols are carried from frame so the rows can be joined to another
+    model's; any that are absent are skipped. Quality columns added by
+    out_of_fold_predictions(with_quality=True) are carried too.
+    """
+    level_columns = list(level_columns)
+    depth = len(level_columns)
+    n = len(prefix)
+    if not (len(actual) == len(frame) == len(folds) == n):
+        raise ValueError(
+            "prefix, actual, folds and frame must be the aligned outputs of "
+            "one out_of_fold_predictions() call."
+        )
+
+    out = pd.DataFrame(index=range(n))
+    for col in (id_cols or []):
+        if col in frame.columns:
+            out[col] = frame[col].astype(str).to_numpy()
+    out["fold"] = np.asarray(folds, dtype=int)
+
+    for level in level_columns:
+        out[f"Actual {level}"] = actual[level].astype(str).to_numpy()
+    for level in level_columns:
+        out[f"Predicted {level}"] = (
+            prefix[f"L{depth} Predicted {level}"].astype(str).to_numpy()
+        )
+    for d in range(1, depth + 1):
+        out[f"L{d} Confidence"] = prefix[f"L{d} Prefix Probability"].to_numpy(dtype=float)
+    for d in range(1, depth + 1):
+        out[f"L{d} Margin"] = prefix[f"L{d} Margin"].to_numpy(dtype=float)
+    for d in range(1, depth + 1):
+        agrees = np.ones(n, dtype=bool)
+        for level in level_columns[:d]:
+            agrees &= (
+                prefix[f"L{d} Predicted {level}"].astype(str).to_numpy()
+                == prefix[f"L{depth} Predicted {level}"].astype(str).to_numpy()
+            )
+        out[f"L{d} Prefix Agrees"] = agrees
+
+    for col in ("n_tokens", "n_known", "oov_rate", "usable"):
+        if col in frame.columns:
+            out[col] = frame[col].to_numpy()
+    return out
 
 
 # ---------------------------------------------------------------------------
