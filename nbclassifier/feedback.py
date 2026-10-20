@@ -224,19 +224,25 @@ def split_feedback(
     text_col: str,
     cleaned_col: str,
     id_col: str = "ID",
-    prediction_files="all",
+    derived_ids_file=None,
+    derived_ids_has_header: bool = True,
+    prediction_files=None,
     derived_flag_col: Optional[str] = None,
-    pool_source: str = "prediction_files",
+    pool_source: str = "auto",
 ) -> FeedbackData:
     """Split labelled rows into organic and derived, and build the pool.
 
-    Derived rows are those flagged in `derived_flag_col` or, without a flag
-    column, those whose ID appears in a notebook-04 prediction file.
+    Derived rows are identified by the first of these that is set:
+        derived_ids_file   a one-column .txt/.csv of IDs (same format as the
+                           blacklist files): the items already predicted for
+        derived_flag_col   a data column marking derived rows (1/true/yes)
+        prediction_files   notebook-04 outputs; a row is derived if its ID is in them
 
-    pool_source "prediction_files": every predicted item (accepted or not) that
+    pool_source "auto": "prediction_files" when prediction files are given,
+                otherwise "derived".
+                "prediction_files": every predicted item (accepted or not) that
                 is not organic. Needs the text in the prediction files.
-                "derived": only the derived rows (when you know nothing about
-                the items that were predicted but not accepted).
+                "derived": only the derived rows.
     """
     df = prepared.df.copy()
     levels = list(level_columns)
@@ -245,7 +251,26 @@ def split_feedback(
     df[id_col] = df[id_col].astype(str).str.strip()
     preds = load_prediction_files(prediction_files, id_col) if prediction_files else None
 
-    if derived_flag_col:
+    if pool_source == "auto":
+        pool_source = "prediction_files" if preds is not None else "derived"
+
+    id_list_info = {}
+    if derived_ids_file is not None:
+        from .data import read_blacklist
+
+        ids = set(read_blacklist(derived_ids_file, has_header=derived_ids_has_header))
+        if not ids:
+            raise ValueError(f"DERIVED_IDS_FILE {derived_ids_file} lists no IDs")
+        is_derived = df[id_col].isin(ids)
+        found = set(df.loc[is_derived, id_col])
+        id_list_info = {"derived_ids_file": str(paths.resolve(derived_ids_file)), "ids_in_file": len(ids),
+                        "ids_found_in_data": len(found)}
+        how = f"ID listed in {Path(str(derived_ids_file)).name}"
+        print(f"{Path(str(derived_ids_file)).name}: {len(ids):,} IDs, {len(found):,} of them in the labelled data")
+        if len(found) < len(ids):
+            print(f"note: {len(ids) - len(found):,} listed IDs are not in the labelled data (not written back as "
+                  "categories yet, removed by the blacklist or cleaning, or a different ID format)")
+    elif derived_flag_col:
         if derived_flag_col not in df.columns:
             raise KeyError(f"DERIVED_FLAG_COL {derived_flag_col!r} not in data columns")
         is_derived = df[derived_flag_col].astype(str).str.strip().str.lower().isin(TRUE_VALUES)
@@ -254,7 +279,7 @@ def split_feedback(
         is_derived = df[id_col].isin(set(preds[id_col]))
         how = f"ID in {preds['_prediction_file'].nunique()} prediction file(s)"
     else:
-        raise ValueError("No prediction files found and no DERIVED_FLAG_COL: cannot tell which "
+        raise ValueError("Set DERIVED_IDS_FILE (or DERIVED_FLAG_COL / PREDICTION_FILES): cannot tell which "
                          "labelled rows came from predictions")
 
     organic = df.loc[~is_derived].reset_index(drop=True)
@@ -302,6 +327,7 @@ def split_feedback(
         "production_ratio": float(len(derived) / max(len(organic), 1)),
         "prediction_files": sorted(preds["_prediction_file"].unique().tolist()) if preds is not None else [],
         "notes": notes,
+        **id_list_info,
         "id_col": id_col,
         "cleaned_col": cleaned_col,
         "level_columns": levels,

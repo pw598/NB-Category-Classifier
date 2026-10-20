@@ -145,3 +145,19 @@ def test_ratio_surface_recovers_known_curve():
     y = s.design(r, n) @ np.array([0.02, -0.01, 0.005])
     s.fit(r, n, y)
     np.testing.assert_allclose(s.predict(0.7, 8000).ravel(), s.design([0.7], [8000]) @ [0.02, -0.01, 0.005])
+
+
+def test_split_from_derived_ids_file(tmp_path):
+    from nbclassifier.data import PreparedData
+
+    rng = np.random.default_rng(1)
+    df = _rows(60, 100, rng, 0.0).rename(columns={"Clean": "CleanDesc"})
+    df["FullDesc"] = df["CleanDesc"]
+    ids_file = tmp_path / "derived_ids.txt"
+    ids_file.write_text("ID\n100\n 101 \n\"102\"\n99999\n")   # header, stray spaces/quotes, one unknown ID
+    fd = fb.split_feedback(PreparedData(df, cleaner=None), level_columns=LEVELS, text_col="FullDesc",
+                           cleaned_col="CleanDesc", derived_ids_file=ids_file)
+    assert sorted(fd.derived["ID"]) == ["100", "101", "102"]
+    assert len(fd.organic) == 57 and not set(fd.organic["ID"]) & {"100", "101", "102"}
+    assert sorted(fd.pool["ID"]) == ["100", "101", "102"] and fd.pool["derived"].all()
+    assert fd.info["ids_in_file"] == 4 and fd.info["ids_found_in_data"] == 3

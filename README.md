@@ -213,15 +213,17 @@ them can look like a large gain, but scoring on them is circular, and the model 
 trained on all organic labels, so it has seen any organic holdout. Notebooks 05-07 estimate the real
 effect without validating those items by hand.
 
-**Terms.** *Derived* rows are labelled rows whose ID appears in a notebook-04 prediction file
-(`PREDICTION_FILES`), or that are flagged in `DERIVED_FLAG_COL`. *Organic* rows are the rest. The
-*pool* is every item in those prediction files, accepted or not; re-labelling it needs
-`INCLUDE_TEXT = True` in notebook 04. The *ratio* is derived rows / organic rows, and the production
-ratio is the one in the data.
+**Terms.** *Derived* rows are labelled rows whose ID is listed in `DERIVED_IDS_FILE`: a one-column
+.txt/.csv of the IDs of items already predicted for, in the same format as the blacklist files. *Organic*
+rows are the rest. The *pool* the fold teachers re-label is the derived rows. Optionally,
+`PREDICTION_FILES` (notebook-04 outputs, which need `INCLUDE_TEXT = True`) adds the items that were
+predicted but not accepted, and the production confidences for the diagnostics. Without an ID file, a
+row whose ID is in those files counts as derived, or `DERIVED_FLAG_COL` can mark them. The *ratio* is
+derived rows / organic rows, and the production ratio is the one in the data.
 
 **Cross-fitting.** Every experiment splits the organic rows into ID-hash folds. For each test fold, a
 teacher is trained only on the other folds, re-labels the pool and re-applies the acceptance rule
-(`ACCEPT_LEVEL`, `ACCEPT_MIN_CONFIDENCE`). Students are scored on the test fold, which no model in
+(`ACCEPT_LEVEL`, `ACCEPT_MIN_CONFIDENCE`; leave it at None when the pool is the derived rows only). Students are scored on the test fold, which no model in
 that fold has seen. The recorded labels of the derived rows are used for diagnostics only.
 Differences between models are paired bootstraps over the same test rows.
 
