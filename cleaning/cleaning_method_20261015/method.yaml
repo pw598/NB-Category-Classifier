@@ -1,0 +1,57 @@
+# ---------------------------------------------------------------------------
+# Cleaning method: cleaning_method_20261015
+# ---------------------------------------------------------------------------
+# The 13-step procedure from cleaning_repo/01_clean_data.ipynb. The step code
+# (clean_steps.py, term_lists.py) and the term lists (cleaning_lists/) in this
+# folder are byte-for-byte copies of cleaning_repo. The settings below are the
+# values from that notebook's settings cell.
+#
+#  1. uppercase                         8. glue units to numbers (12 PC -> 12PC, GR 8 -> GR8)
+#  2. new cleaned field                 9. sizes -> <SIZE> (clothing sizes, 12PC -> <SIZE>PC,
+#  3. repair words split at the field      2X4, 1-1/4 ...), then delete stray digits
+#     boundary                         10. remove punctuation
+#  4. remove record markers            11. remove words found in fewer than
+#  5. remove the first word unless it      min_word_descriptions descriptions
+#     is an English word / good token  12. collapse repeated placeholders
+#  6. colors -> <COLOR>                13. tidy spaces
+#  7. standardize units (units.txt)
+#
+# Step 11's vocabulary is learned from the TRAINING data (notebooks 01-03) and
+# frozen with the cleaner, so prediction (notebook 04) uses the training
+# vocabulary - the cleaning_repo notebook's BUILD_VOCABULARY = False path.
+#
+# To make a new method: copy this folder under a new name and edit it.
+# The whole folder (code, lists, settings) is frozen into every dataset and
+# model cleaned with it, so editing it never changes an existing model.
+# ---------------------------------------------------------------------------
+
+name: cleaning_method_20261015
+
+lists:                                   # files in cleaning_lists/
+  units: units.txt
+  colors: colors.txt
+  color_abbrevs: color_abbrevs.txt
+  sizes: sizes.txt
+  good_tokens: good_tokens_20261008.csv
+english_words_file: null                 # null = NLTK word list; or a file in this folder, one word per line
+
+# step 3
+field_width: 24                          # split words have a space right after this character
+repair_min_count: 3                      # the rejoined word must occur at least this often elsewhere
+
+# step 4 ("*" = any characters)
+markers: ["(DV)", "[DV]", "(DC)", "[DC]", "(BP)", "(R-*)"]
+
+# step 5 safeguards
+keep_word_forms: true                    # keep a first word that is a plural/hyphenated/compound English word
+keep_measurements: true                  # keep a first word that is a size, such as 7/16-20 or 1/2IN
+keep_common_words: 50                    # keep a letters-only first word found in this many descriptions; null = off
+
+# step 10
+punctuation_mode: delete                 # "space": T-MAX -> T MAX;  "delete": T-MAX -> TMAX
+
+# step 11
+min_word_descriptions: 5                 # a word must appear in at least this many (training) descriptions
+
+# step 12
+collapse_placeholders: ["<SIZE>", "<COLOR>"]

@@ -1,0 +1,129 @@
+# units.txt: how unit terms are standardised (steps 7 and 8 of 01_clean_data).
+#
+# One unit per line:      ABBREVIATION = form, form, form
+#
+#   ABBREVIATION  the abbreviated, singular form that every listed form is replaced by.
+#                 It is recognised itself as well, so "10 MM" is glued to "10MM".
+#   form          a full name, plural, spelling variant or other abbreviation.
+#                 Forms may contain spaces ("CUBIC FEET") or punctuation ('"', "I.D.").
+#   ~form         replaced only when it directly follows a number, glued or after a space
+#                 ("10 FOOT" -> "10 FT"), never on its own. Use this for forms that are also
+#                 ordinary words ("FOOT", "CASE", "DRIVE") or single characters.
+#                 Forms without "~" are replaced wherever they appear as whole words.
+#                 An abbreviation is only ever glued to a number, so it needs no "~".
+#
+#   A line starting with ">" is a prefix unit: it is glued to a number that FOLLOWS it
+#   ("GRADE 8" -> "GR8"), unless a number comes before it ("8 GRADE" -> "8GR").
+#
+# Lines starting with "#" are comments. Case does not matter.
+# Abbreviations are written without spaces ("CUFT", not "CU FT") so that each stays one word.
+
+# ---- length
+IN = INCH, INCHES, ~ININ, ~", ~''
+FT = FEET, ~FOOT, ~FTFT, ~'
+YD = YARDS, ~YARD, ~YDS
+MM = MILLIMETER, MILLIMETERS, MILLIMETRE, MILLIMETRES, MILIMETER, MILIMETERS, MILIMETRE, MILIMETRES
+CM = CENTIMETER, CENTIMETERS, CENTIMETRE, CENTIMETRES
+M = ~METER, ~METERS, ~METRE, ~METRES, ~MTR, ~MTRS
+KM = KILOMETER, KILOMETERS, KILOMETRE, KILOMETRES
+UM = MICRON, MICRONS, ~µM
+MIL = ~MILS
+DIA = DIAMETER, ~DIAM
+ID = INNER DIAMETER, INSIDE DIAMETER, I.D.
+OD = OUTER DIAMETER, OUTSIDE DIAMETER, O.D.
+
+# ---- area and volume
+SQIN = SQ IN, SQUARE INCH, SQUARE INCHES
+SQFT = SQ FT, SQUARE FOOT, SQUARE FEET
+CUIN = CU IN, CUBIC INCH, CUBIC INCHES
+CUFT = CU FT, CUBIC FOOT, CUBIC FEET, ~CFT
+CUYD = CU YD, CUBIC YARD, CUBIC YARDS
+GAL = GALLON, GALLONS, ~GALS
+QT = QUART, QUARTS, ~QTS
+PT = PINT, PINTS, ~PTS, ~POINT
+L = LITER, LITERS, LITRE, LITRES, ~LTR, ~LTRS
+ML = MILLILITER, MILLILITERS, MILLILITRE, MILLILITRES, MILILITER, MILILITERS, MILILITRE, MILILITRES
+FLOZ = FL OZ, FLUID OUNCE, FLUID OUNCES
+CC = ~CCS
+
+# ---- weight
+LB = POUND, POUNDS, LBS, ~#
+OZ = OUNCE, OUNCES, ~OZS
+G = GRAM, GRAMS, ~GM, ~GMS
+KG = KILOGRAM, KILOGRAMS, ~KGS, ~KILO, ~KILOS
+MG = MILLIGRAM, MILLIGRAMS
+TON = ~TONS
+
+# ---- count and packaging
+EA = ~EACH
+PC = PIECE, PIECES, PCS, ~PCE
+PK = PACK, PACKS, PKG, PKGS, ~PAK
+BX = BOX, BOXES, ~BXS
+CA = ~CASE, ~CASES, ~CS
+BG = ~BAG, ~BAGS
+CT = CNT, ~COUNT, ~CTS
+PR = PAIR, PAIRS, ~PRS
+DZ = DOZEN, ~DOZ
+RL = ~ROLL, ~ROLLS
+SPL = ~SPOOL, ~SPOOLS
+SH = ~SHEET, ~SHEETS
+UNIT = ~UNITS
+PLY = ~PLIES
+
+# ---- electrical
+V = VOLT, VOLTS, ~VLT
+VAC = ~V AC
+VDC = ~V DC
+A = AMPS, AMPERE, AMPERES, ~AMP
+MA = MILLIAMP, MILLIAMPS
+AH = ~AMP HOUR, ~AMP HOURS
+MAH = ~MAHS
+W = WATT, WATTS
+KW = KILOWATT, KILOWATTS
+KV = KILOVOLT, KILOVOLTS
+HZ = HERTZ
+KHZ = KILOHERTZ
+MHZ = MEGAHERTZ
+OHM = OHMS
+AWG = ~AWGS
+GA = ~GAUGE, ~GAGE
+
+# ---- pressure, flow, speed, power, temperature, sound, light
+PSI = ~PSIG
+KPA =
+MPA =
+CFM =
+GPM =
+GPH =
+RPM =
+HP = HORSEPOWER
+BTU = ~BTUS
+DEG = DEGREES, ~DEGREE, ~°
+DB = ~DECIBEL, ~DECIBELS
+LM = LUMEN, LUMENS
+
+# ---- time
+HR = HOUR, HOURS, ~HRS
+MIN = ~MINUTE, ~MINUTES, ~MINS
+SEC = ~SECOND, ~SECONDS, ~SECS
+
+# ---- threads, drives, tooling, abrasives
+TPI = THREADS PER INCH
+NPT =
+NPTF =
+MNPT = ~MPT, ~MIP
+FNPT = ~FPT, ~FIP
+NPS =
+UNC =
+UNF =
+NC =
+NF =
+DR = ~DRIVE
+FL = ~FLUTE, ~FLUTES
+T = ~TOOTH, ~TEETH
+GRIT =
+MESH =
+CAL =
+
+# ---- prefix units: glued to the number that follows
+>GR = GRADE
