@@ -13,6 +13,9 @@ none of the threshold, cost or calibration machinery.
 | `notebooks/02_evaluation.ipynb` | cross-validation, or a grid search of cross-validations, with checkpoints | `outputs/evaluation_<ts>/` |
 | `notebooks/03_train_to_deploy.ipynb` | train on all labelled data and save the model | `models/model_<ts>/` |
 | `notebooks/04_batch_predict.ipynb` | predict uncategorized items with a saved model | `outputs/predictions_<ts>/` |
+| `notebooks/05_feedback_learning_curve.ipynb` | gain from training on prediction-derived labels, as a curve over their ratio | `outputs/feedback_learning_curve_<ts>/` |
+| `notebooks/06_feedback_matched_ratio.ipynb` | the same gain at the production ratio, repeated at increasing scale | `outputs/feedback_matched_ratio_<ts>/` |
+| `notebooks/07_feedback_noise_dose.ipynb` | noise of the derived labels vs teacher size, and the cost of that noise | `outputs/feedback_noise_dose_<ts>/` |
 
 Every notebook starts with a settings cell. All hyperparameters are written out in the notebook, so
 none are hidden as defaults. Each notebook has `USE_MLFLOW = True/False` at the top.
@@ -53,7 +56,7 @@ tests/                   pytest: sklearn equivalence, cleaning parity with clean
 
 Package modules: `paths`, `bootstrap`, `config` (hyperparameters, grid, CV settings), `cleaning`, `data`,
 `vectorizers`, `model`, `folds`, `predict`, `crossval` (CV and grid search), `evaluation` (buckets, plots),
-`artifacts` (model save/load), `tracking` (MLflow). The tracking module isn't named `mlflow.py`
+`artifacts` (model save/load), `tracking` (MLflow), `feedback` (notebooks 05-07). The tracking module isn't named `mlflow.py`
 because that name would shadow the real `mlflow` package.
 
 ## Cleaning
@@ -202,6 +205,40 @@ With `USE_MLFLOW = True` the notebooks log the following:
 
 `MLFLOW_EXPERIMENT = None` uses each notebook's own experiment. Set a workspace path to collect all
 runs in one place.
+
+## Feedback-loop experiments (notebooks 05-07)
+
+Items predicted by notebook 04 and written back as categories return in the labelled pull. Training on
+them can look like a large gain, but scoring on them is circular, and the model that predicted them was
+trained on all organic labels, so it has seen any organic holdout. Notebooks 05-07 estimate the real
+effect without validating those items by hand.
+
+**Terms.** *Derived* rows are labelled rows whose ID appears in a notebook-04 prediction file
+(`PREDICTION_FILES`), or that are flagged in `DERIVED_FLAG_COL`. *Organic* rows are the rest. The
+*pool* is every item in those prediction files, accepted or not; re-labelling it needs
+`INCLUDE_TEXT = True` in notebook 04. The *ratio* is derived rows / organic rows, and the production
+ratio is the one in the data.
+
+**Cross-fitting.** Every experiment splits the organic rows into ID-hash folds. For each test fold, a
+teacher is trained only on the other folds, re-labels the pool and re-applies the acceptance rule
+(`ACCEPT_LEVEL`, `ACCEPT_MIN_CONFIDENCE`). Students are scored on the test fold, which no model in
+that fold has seen. The recorded labels of the derived rows are used for diagnostics only.
+Differences between models are paired bootstraps over the same test rows.
+
+| notebook | question | how |
+|---|---|---|
+| 05 | how does the gain change with the ratio? | students over a grid of organic fractions x ratios; a smooth surface fitted to the gains and read at the production ratio and size; leave-one-out check of the extrapolation |
+| 06 | what is the gain at the production mix? | the production ratio at several organic scales, each teacher trained on that scale's rows; trend across scales extrapolated to production size |
+| 07 | how noisy are the derived labels, and what does the noise cost? | teacher error vs teacher size on clean folds, transferred to the pool by calibration and extrapolated; then organic rows posing as the pool with a dialled share of the teacher's errors, read at the estimated noise |
+
+Notebook 07's simulated pool comes from the organic population, so it tests the ratio and the noise,
+not the shift between organic items and the items that needed predicting. The diagnostics table in each
+notebook reports how often the recorded derived labels match the production predictions. Below 1.0,
+some were corrected after prediction, and the experiments understate the real labels' quality.
+
+Results are checkpointed like notebook 02: the data is copied into the output folder, each finished cell
+is written at once, and `RESUME_FROM = "feedback_<kind>_<ts>"` continues a run without re-pulling.
+`FOLDS_TO_RUN = [0]` gives a quick first look.
 
 ## What was removed from the old repos
 
